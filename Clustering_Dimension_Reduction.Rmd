@@ -18,6 +18,7 @@ Download auto data from the *Statistical Learning* book website here: http://www
 Today, we are going over Hierarchical clustering, K-Means Clustering, PCA, and ICA. 
 
 ```{r load, include=FALSE}
+library(factoextra)
 library(ggplot2)
 library(tidyverse)
 library(ggfortify)
@@ -26,7 +27,7 @@ library(fastICA)
 
 ```{r}
 # read in Auto data
-Auto_data <- read_csv("/Users/ay1392/Desktop/Auto.csv")
+Auto_data <- read_csv("~/Desktop/MS/fall/machine learning/assignments/hw1-taitea/Auto.csv")
 
 #remove cars with unknown horsepower and set horsepower to numeric
 Auto_data <- Auto_data %>% 
@@ -176,7 +177,7 @@ Step 4. Multiply the eigen vector matrix by the original data.
 ```{r}
 PC <- as.data.frame(data.matrix(Center_auto) %*% Eigen_vector_auto)
 
-ggplot(PC, aes(PC[,1], PC[,2])) + geom_point(aes(PC[,1], PC[,2]))
+ggplot(PC, aes(PC[,1], PC[,2])) + geom_point(aes(PC[,1], PC[,2])) 
 #+ geom_text(aes(label=Auto_data_names[1:8]), nudge_x = -2.5, nudge_y = 400)
 ```
 
@@ -273,21 +274,201 @@ data(iris)
 
 0. Subset the Iris dataset to only include `Sepal.Length`, `Sepal.Width`, `Petal.Length`, and `Petal.Width`. 
 
+```{r}
+#subsetting by removing the extra variable and saving as a new dataset
+iris_mod <- iris[c(-5)]
+
+#saving species names
+species_names <- iris$Species
+```
+
 1. Write out the Kmeans algorithm by hand, and run two iterations of it. 
+
+```{r}
+#converting data from list to matrix
+iris_mod_matrix=as.matrix(iris_mod)
+centers <- iris_mod_matrix[sample(nrow(iris_mod_matrix), 3),]
+
+#defining euclidean distance to be used in kmeans calculation
+euclid <- function(points1, points2) {
+  distanceMatrix <- matrix(NA, nrow=dim(points1)[1], ncol=dim(points2)[1])
+  for(i in 1:nrow(points2)) {
+    distanceMatrix[,i] <- sqrt(rowSums(t(t(points1)-points2[i,])^2))
+  }
+  distanceMatrix
+}
+
+#defining kmeans clustering as a function
+K_means <- function(x, centers, distFun, nItter) {
+  clusterHistory <- vector(nItter, mode="list")
+  centerHistory <- vector(nItter, mode="list")
+
+  for(i in 1:nItter) {
+    distsToCenters <- distFun(x, centers)
+    clusters <- apply(distsToCenters, 1, which.min)
+    centers <- apply(x, 2, tapply, clusters, mean)
+    clusterHistory[[i]] <- clusters
+    centerHistory[[i]] <- centers
+  }
+
+  list(clusters=clusterHistory, centers=centerHistory)
+}
+
+#calling function for 2 iterations on data matrix and printing results
+iris_cluster <- K_means(iris_mod_matrix, centers, euclid, 2)
+iris_cluster
+```
 
 2. Run PCA on the Iris dataset. Plot a scatter plot of PC1 vs PC2 and include the percent variance those PCs describe. 
 
+```{r}
+#Step 1. Center data by subtracting the mean.
+iris_data_clust_pca <- data.matrix(iris_mod)
+center_iris <- apply(iris_data_clust_pca, 2, function(x) x - mean(x))
+
+#Step 2. Calculate covariance matrix of data.
+covariance_iris <- cov(center_iris)
+
+#Step 3. Perform Eigendecomposition of the covariance matrix
+eigen_value_iris <- eigen(covariance_iris)$value
+eigen_vector_iris <- eigen(covariance_iris)$vector
+
+#Step 4. Multiply the eigen vectors by the original data to express the data in terms of the eigen vectors.
+PC <- as.data.frame(data.matrix(center_iris) %*% eigen_vector_iris)
+
+#Step 5. Find out which principal components explain the variance in the data.
+#plot PC1 and PC2 in scatterplot
+ggplot(PC, aes(PC[,1], PC[,2])) + geom_point(aes(PC[,1], PC[,2]))
+#calculate variance explained
+round(cumsum(eigen_value_iris)/sum(eigen_value_iris) * 100, digits = 2)
+```
+PC1 explains 92.46 percent of the variance. PC1 and PC2 explain 97.77 percent of the variance.
+
 3. Run ICA on the Iris dataset. Plot the independent components as a heatmap.
+
+```{r, message=FALSE, warning=FALSE}
+#create a matrix S with the independent components
+S <- cbind(cos((1:500)/10), ((500:1)/1000))
+
+par(mfcol = c(1, 2))
+plot(S[,1], type="l")
+plot(S[,2], type="l")
+
+#create a mixing matrix A
+A <- matrix(c(0.5, 0.7, 0.423, 0.857), 2, 2)
+
+#mix S using A
+X <- S %*% A
+par(mfcol = c(1, 2))
+plot(X[,1], type="l")
+plot(X[,2], type="l")
+
+#unmix using FastICA
+a <- fastICA(X, 2, alg.typ = "parallel", fun = "logcosh", alpha = 1,
+             method = "R", row.norm = FALSE, maxit = 200,
+             tol = 0.0001, verbose = TRUE)
+
+#ICA on the iris data
+iris_ica <- fastICA(iris_mod, 7, alg.typ = "parallel", fun = "logcosh", alpha = 1,
+             method = "R", row.norm = FALSE, maxit = 200,
+             tol = 0.0001, verbose = TRUE)
+
+#heatmap of iris ICA
+heatmap(iris_ica$S)
+```
 
 4. Use Kmeans to cluster the Iris data. 
   * Use the silhouette function in the cluster package to find the optimal number of clusters for kmeans for the iris dataset. Then cluster using kmeans clustering. Does the data cluster by species? 
   * Using this clustering, color the PCA plot according to the clusters.
+
+```{r}
+library(cluster)
+library(purrr)
+
+#generating silhouette plot for a variety of cluster numbers
+iris_k2 <- pam(iris, k=2)
+plot(silhouette(iris_k2))
+
+iris_k3 <- pam(iris, k=3)
+plot(silhouette(iris_k3))
+
+iris_k4 <- pam(iris, k=4)
+plot(silhouette(iris_k4))
+
+#calculating highest average silhouette width
+sil_width <- map_dbl(2:10, function(k) {model <- pam(x = iris, k = k) 
+  model$silinfo$avg.width})
+sil_df <- data.frame(k = 2:10, sil_width = sil_width)
+print(sil_df)
+
+#kmeans clustering
+set.seed(20)
+clusters <- kmeans(iris_mod, 2)
+iris$clusters <- as.factor(clusters$cluster)
+str(clusters)
+
+#PCA plot by cluster
+set.seed(20)
+autoplot(kmeans(iris_mod, 2), data = iris_mod)
+```
+
+The silhouette analysis indicated that the optimal number of clusters is 2, but the dataset includes 3 species, so it does not cluster by species.
   
 5. Use hierarchical clustering to cluster the Iris data.
 
   * Try two different linkage types, and two different distance metrics. 
   * For one linkage type and one distance metric, try two different cut points. 
   * Using this clustering, color the PCA plot according to the clusters. (6  plots in total)
+
+```{r, message=FALSE, warning=FALSE}
+#hierarchical clustering with average linkage and euclidean distance metric
+iris_hierarchical_dist_eu <- dist(iris_mod, method = "euclidean")
+tree_1 <- hclust(iris_hierarchical_dist_eu, method="average")
+plot(tree_1)
+
+#hierarchical clustering with average linkage and maximum distance metric
+iris_hierarchical_dist_max <- dist(iris_mod, method = "maximum")
+tree_2 <- hclust(iris_hierarchical_dist_max, method="average")
+plot(tree_2)
+
+#hierarchical clustering with single linkage and euclidean distance metric
+tree_3 <- hclust(iris_hierarchical_dist_eu, method="single")
+plot(tree_3)
+
+#hierarchical clustering with single linkage and maximum distance metric
+tree_4 <- hclust(iris_hierarchical_dist_max, method="single")
+plot(tree_4)
+
+#hierarchical clustering with average linkage and euclidean distance metric with 2 cut points (3 and 4)
+tree_5 <- hclust(iris_hierarchical_dist_eu, method="average")
+plot(tree_5)
+tree_k3 <- cutree(tree_5, k = 3)
+rect.hclust(tree_5, k = 3, h = NULL)
+
+tree_6 <- hclust(iris_hierarchical_dist_eu, method="average")
+plot(tree_6)
+tree_k4 <- cutree(tree_6, k = 4)
+rect.hclust(tree_6, k = 4, h = NULL)
+
+#plots of PCA colored by hierarchical clusters computed above
+iris_tree_1 <- hcut(iris_hierarchical_dist_eu, hc_method = "average")
+fviz_cluster(iris_tree_1, ellipse.type = "convex", data = iris_mod)
+
+iris_tree_2 <- hcut(iris_hierarchical_dist_max, hc_method = "average")
+fviz_cluster(iris_tree_2, ellipse.type = "convex", data = iris_mod)
+
+iris_tree_3 <- hcut(iris_hierarchical_dist_eu, hc_method = "single")
+fviz_cluster(iris_tree_3, ellipse.type = "convex", data = iris_mod)
+
+iris_tree_4 <- hcut(iris_hierarchical_dist_max, hc_method = "single")
+fviz_cluster(iris_tree_4, ellipse.type = "convex", data = iris_mod)
+
+iris_tree_5 <- hcut(iris_hierarchical_dist_eu, k = 3, hc_method = "average")
+fviz_cluster(iris_tree_5, ellipse.type = "convex", data = iris_mod)
+
+iris_tree_6 <- hcut(iris_hierarchical_dist_eu, k = 4, hc_method = "average")
+fviz_cluster(iris_tree_6, ellipse.type = "convex", data = iris_mod)
+```
   
 
 # Optional material
